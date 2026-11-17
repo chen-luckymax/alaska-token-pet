@@ -140,7 +140,7 @@ function createPetWindow() {
       backgroundThrottling: false
     }
   });
-  petWindow.on('closed', () => { safeLog('[pet] closed'); petWindow = null; });
+  petWindow.on('closed', () => { petWindow = null; });
   petWindow.setAlwaysOnTop(true, 'screen-saver');
   petWindow.setMinimumSize(dims.width, dims.height);
   petWindow.setMaximumSize(dims.width, dims.height);
@@ -261,7 +261,6 @@ function createPanelWindow() {
       event.preventDefault();
       panelDismissed = true;
       panelWindow.hide();
-      safeLog('[panel] unexpected close prevented');
     }
   });
   panelWindow.on('closed', () => { safeLog('[panel] closed'); panelWindow = null; });
@@ -711,12 +710,10 @@ app.whenReady().then(async () => {
 });
 
 app.on('before-quit', () => {
-  safeLog('[app] before-quit');
   appQuitting = true;
   if (stateTimer) clearInterval(stateTimer);
   if (balanceTimer) clearInterval(balanceTimer);
   if (panelWatchdog) clearInterval(panelWatchdog);
   if (appServer) appServer.close();
 });
-app.on('will-quit', () => safeLog('[app] will-quit'));
-app.on('window-all-closed', () => { safeLog('[app] window-all-closed'); /* keep tray alive */ });
+app.on('window-all-closed', () => { /* keep tray alive */ });
