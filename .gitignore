@@ -46,3 +46,7 @@ model/cat-render*.txt
 model/cat-build-log*.txt
 model/groom-lift.png
 model/actual-*.png
+model/idle-*.png
+*.blend1
+ref/
+app/server.js
