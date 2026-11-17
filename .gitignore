@@ -51,3 +51,4 @@ model/idle-*.png
 ref/
 app/server.js
 model/eat-mouth*.png
+model/inspect_groom.py
