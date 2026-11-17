@@ -50,3 +50,4 @@ model/idle-*.png
 *.blend1
 ref/
 app/server.js
+model/eat-mouth*.png
