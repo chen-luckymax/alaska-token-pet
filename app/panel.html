@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>阿拉斯加 · 钱包与对话</title>
+<link rel="stylesheet" href="./panel.css">
+</head>
+<body>
+  <header class="titlebar">
+    <div class="brand">
+      <div class="avatar"><span class="a-eye l"></span><span class="a-eye r"></span><span class="a-muzzle"></span><span class="a-nose"></span></div>
+      <div>
+        <h1>阿拉斯加</h1>
+        <p>AI token 小伙伴</p>
+      </div>
+    </div>
+    <div class="window-actions">
+      <button id="minBtn" class="icon-btn" title="收起">—</button>
+      <button id="closeBtn" class="icon-btn close" title="关闭">×</button>
+    </div>
+  </header>
+
+  <nav class="tabs">
+    <button class="tab active" data-tab="balance">钱包</button>
+    <button class="tab" data-tab="chat">对话</button>
+    <span class="status-dot"></span>
+  </nav>
+
+  <main>
+    <section id="tab-balance" class="tab-panel active">
+      <div class="hero-card">
+        <div class="hero-top">
+          <span class="eyebrow">本次会话</span>
+          <span id="okBadge" class="badge">读取中</span>
+        </div>
+        <div class="token-line"><strong id="bigTokens">0</strong><span>tokens</span></div>
+        <p id="sourceLine" class="source-line">正在扫描 Codex / CSG 会话…</p>
+        <div class="meter"><span id="contextFill"></span></div>
+        <div class="meter-labels"><span>上下文</span><span id="contextText">0%</span></div>
+      </div>
+
+      <div class="stat-grid">
+        <article class="stat-card">
+          <span class="stat-label">估算花费</span>
+          <strong id="costValue">¥0.00</strong>
+          <small>按当前价格表</small>
+        </article>
+        <article class="stat-card accent">
+          <span class="stat-label">今日预算余额</span>
+          <strong id="budgetValue">¥10.00</strong>
+          <small id="budgetHint">上限 ¥10.00</small>
+        </article>
+      </div>
+
+      <div class="feed-box">
+        <div class="section-head">
+          <h2>试吃动作</h2>
+          <span>点击就能看到完整的 3D 进食</span>
+        </div>
+        <div class="feed-buttons">
+          <button class="feed-btn" data-tier="icecream"><b>冰激凌</b><small>轻量任务</small></button>
+          <button class="feed-btn" data-tier="cookie"><b>双球冰激凌</b><small>5k+</small></button>
+          <button class="feed-btn" data-tier="watermelon"><b>水果碗</b><small>20k+</small></button>
+          <button class="feed-btn" data-tier="meal"><b>水果米饭</b><small>100k+</small></button>
+        </div>
+        <p class="feed-note">冰激凌会举到嘴边舔，正餐会端碗低头吃；动作结束自动回到待机，不会留下食物残影。</p>
+      </div>
+
+      <div class="feed-box">
+        <div class="section-head">
+          <h2>阿拉斯加大小</h2>
+          <span>太大会挡桌面，太小看不清</span>
+        </div>
+        <div class="feed-buttons">
+          <button class="feed-btn size-btn" data-size="small"><b>小</b><small>默认</small></button>
+          <button class="feed-btn size-btn" data-size="medium"><b>中</b><small>看细节</small></button>
+          <button class="feed-btn size-btn" data-size="large"><b>大</b><small>看得清楚</small></button>
+        </div>
+      </div>
+    </section>
+
+    <section id="tab-chat" class="tab-panel">
+      <div class="chat-intro">
+        <span class="chat-mark">AI</span>
+        <h2>和阿拉斯加说说话</h2>
+        <p>可以直接在这里聊。远程模型走 OpenAI 兼容接口；没配 Key 时，会尝试本机 Ollama，不上传对话。</p>
+        <p id="chatStatus" class="chat-status">正在检查模型配置…</p>
+      </div>
+      <div id="chatMessages" class="chat-messages">
+        <div class="chat-msg bot">我是阿拉斯加。问 token、预算，或者随便聊聊。</div>
+      </div>
+      <div class="chat-compose">
+        <textarea id="chatInput" rows="2" placeholder="比如：今天的 token 花在哪了？"></textarea>
+        <button id="chatSend" class="primary-btn send-btn">发送</button>
+      </div>
+      <div class="chat-actions">
+        <button id="openChatBtn" class="ghost-btn">打开独立对话窗口</button>
+        <span id="chatHint" class="chat-hint">Enter 发送 · Shift+Enter 换行</span>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <span>右键阿拉斯加也能打开这里</span>
+    <span class="foot-actions"><button id="quitBtn" class="text-btn">退出阿拉斯加</button></span>
+  </footer>
+
+  <script src="./panel.js"></script>
+</body>
+</html>

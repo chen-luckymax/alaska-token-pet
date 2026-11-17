@@ -1,0 +1,514 @@
+const { app, BrowserWindow, ipcMain, screen, Tray, Menu, nativeImage, shell, session } = require('electron');
+const path = require('path');
+const http = require('http');
+const fs = require('fs');
+const { spawn } = require('child_process');
+const { readLatestUsage, readSettings, root } = require('./usage');
+
+// 终端/启动器关闭后 stdout 会变成断管，console.log 在异步回调里抛 EPIPE
+// 会触发 Electron 的“主进程 JavaScript 错误”弹窗。日志写失败只应丢弃，不应影响桌宠。
+const originalConsoleLog = console.log.bind(console);
+const originalConsoleError = console.error.bind(console);
+function isBrokenPipe(error) {
+  return Boolean(error && (error.code === 'EPIPE' || error.code === 'ERR_STREAM_DESTROYED'));
+}
+function safeLog(...args) {
+  try { originalConsoleLog(...args); } catch (error) { if (!isBrokenPipe(error)) throw error; }
+}
+function safeError(...args) {
+  try { originalConsoleError(...args); } catch (error) { if (!isBrokenPipe(error)) throw error; }
+}
+process.stdout.on('error', (error) => { if (!isBrokenPipe(error)) throw error; });
+process.stderr.on('error', (error) => { if (!isBrokenPipe(error)) throw error; });
+
+app.commandLine.appendSwitch('disable-features', 'CalculateNativeWinOcclusion');
+
+let petWindow = null;
+let panelWindow = null;
+let tray = null;
+let appServer = null;
+let appPort = 0;
+let lastTotal = null;
+let lastUsage = null;
+let dragging = false;
+let dragOffset = { x: 0, y: 0 };
+let dragLock = null;
+let stateTimer = null;
+
+const PET_SIZES = {
+  small: { width: 150, height: 198 },
+  medium: { width: 190, height: 250 },
+  large: { width: 240, height: 316 }
+};
+const sizeArg = process.argv.find((arg) => arg.startsWith('--size='));
+let petSize = sizeArg && PET_SIZES[sizeArg.split('=')[1]] ? sizeArg.split('=')[1] : 'small';function petDims() {
+  return PET_SIZES[petSize] || PET_SIZES.small;
+}
+
+const MIME = {
+  '.html': 'text/html; charset=utf-8',
+  '.js': 'text/javascript; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.svg': 'image/svg+xml',
+  '.json': 'application/json; charset=utf-8'
+};
+
+function startAppServer() {
+  return new Promise((resolve, reject) => {
+    const appDir = path.join(__dirname, 'app');
+    safeLog('[pet] serving', appDir);
+    appServer = http.createServer((req, res) => {
+      let pathname = decodeURIComponent((req.url || '/').split('?')[0]);
+      if (pathname === '/') pathname = '/index.html';
+      const file = path.normalize(path.join(appDir, pathname));
+      if (!file.startsWith(appDir)) {
+        res.writeHead(403).end('forbidden');
+        return;
+      }
+      fs.readFile(file, (error, data) => {
+        if (error) {
+          res.writeHead(404).end('not found');
+          return;
+        }
+        res.writeHead(200, {
+          'Content-Type': MIME[path.extname(file).toLowerCase()] || 'application/octet-stream',
+          'Cache-Control': 'no-store, no-cache, must-revalidate'
+        });
+        res.end(data);
+      });
+    });
+    appServer.on('error', reject);
+    appServer.listen(0, '127.0.0.1', () => {
+      appPort = appServer.address().port;
+      resolve(appPort);
+    });
+  });
+}
+
+function clampToWorkArea(x, y, w, h) {
+  const display = screen.getDisplayNearestPoint({ x, y });
+  const area = display.workArea;
+  return {
+    x: Math.round(Math.max(area.x, Math.min(area.x + area.width - w, x))),
+    y: Math.round(Math.max(area.y, Math.min(area.y + area.height - h, y)))
+  };
+}
+
+function positionPet(sizeKey) {
+  if (!petWindow || petWindow.isDestroyed()) return;
+  const dims = sizeKey && PET_SIZES[sizeKey] ? PET_SIZES[sizeKey] : petDims();
+  const area = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea;
+  const x = area.x + Math.round(area.width * 0.50) - Math.round(dims.width / 2);
+  const y = area.y + area.height - dims.height - 90;
+  safeLog(`[pet] position target ${x},${y} area ${JSON.stringify(area)} dims ${dims.width}x${dims.height}`);
+  petWindow.setBounds({ x, y, width: dims.width, height: dims.height });
+  safeLog('[pet] bounds after position', petWindow.getBounds());
+  setTimeout(() => {
+    if (petWindow && !petWindow.isDestroyed()) safeLog('[pet] bounds later', petWindow.getBounds());
+  }, 1200);
+}
+
+function createPetWindow() {
+  const dims = petDims();
+  const opaqueTest = process.argv.includes('--opaque');
+  petWindow = new BrowserWindow({
+    width: dims.width,
+    height: dims.height,
+    transparent: !opaqueTest,
+    frame: false,
+    resizable: false,
+    maximizable: false,
+    minimizable: false,
+    fullscreenable: false,
+    hasShadow: false,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    show: false,
+    title: '阿拉斯加',
+    backgroundColor: opaqueTest ? '#FFF9F0' : '#00000000',
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      backgroundThrottling: false
+    }
+  });
+  petWindow.setAlwaysOnTop(true, 'screen-saver');
+  petWindow.setMinimumSize(dims.width, dims.height);
+  petWindow.setMaximumSize(dims.width, dims.height);
+  petWindow.on('will-resize', (event) => {
+    if (dragging) event.preventDefault();
+  });
+  const pageName = process.argv.includes('--flat') ? 'flat.html' : 'index.html';
+  const demoArg = process.argv.find((arg) => arg.startsWith('--demo='));
+  const pageUrl = `http://127.0.0.1:${appPort}/${pageName}${demoArg ? `?demo=${encodeURIComponent(demoArg.split('=')[1])}` : ''}`;
+  petWindow.loadURL(pageUrl);
+  petWindow.setTitle('阿拉斯加');
+  petWindow.on('page-title-updated', (event) => event.preventDefault());
+  safeLog('[pet] window', petWindow.getBounds(), 'url', pageUrl);
+  petWindow.webContents.on('console-message', (_event, level, message) => {
+    safeLog(`[pet:${level}] ${message}`);
+  });
+  petWindow.webContents.on('did-fail-load', (_event, code, desc) => {
+    safeError(`pet load failed: ${code} ${desc}`);
+  });
+  petWindow.webContents.on('did-finish-load', () => {
+    safeLog('pet page loaded');
+    if (!petWindow.isVisible()) petWindow.show();
+    if (process.argv.includes('--test-dblclick')) {
+      setTimeout(() => {
+        if (!petWindow || petWindow.isDestroyed()) return;
+        const b = petWindow.getBounds();
+        const x = Math.round(b.width / 2);
+        const y = Math.round(b.height * 0.62);
+        const click = (type) => petWindow.webContents.sendInputEvent({ type, x, y, button: 'left', clickCount: 1 });
+        click('mouseDown'); click('mouseUp');
+        setTimeout(() => { click('mouseDown'); click('mouseUp'); safeLog('[pet] test double click sent'); }, 110);
+      }, 1800);
+    }
+    if (process.env.LULU_SNAPSHOT === '1' || process.argv.some((arg) => arg.startsWith('--snapshot'))) {
+      const delayArg = process.argv.find((arg) => arg.startsWith('--snapshot-delay='));
+      const delay = Number(process.env.LULU_SNAPSHOT_DELAY) || (delayArg ? Number(delayArg.split('=')[1]) : 4500);
+      setTimeout(async () => {
+        try {
+          const image = await petWindow.webContents.capturePage();
+          fs.writeFileSync(path.join(__dirname, 'snapshot-electron.png'), image.toPNG());
+          safeLog('snapshot saved');
+        } catch (error) {
+          safeError('snapshot failed', error);
+        }
+        app.quit();
+      }, delay);
+    }
+  });
+  petWindow.once('ready-to-show', () => {
+    positionPet();
+    petWindow.show();
+    // Transparent pixels must not block the desktop. Forwarded mouse moves let
+    // the renderer detect when the cursor is over the actual pet silhouette.
+    petWindow.setIgnoreMouseEvents(true, { forward: true });
+  });
+  petWindow.on('closed', () => {
+    petWindow = null;
+  });
+}
+
+function createPanelWindow() {
+  if (panelWindow && !panelWindow.isDestroyed()) {
+    panelWindow.show();
+    panelWindow.focus();
+    return;
+  }
+  const area = screen.getPrimaryDisplay().workArea;
+  panelWindow = new BrowserWindow({
+    width: 460,
+    height: 610,
+    x: Math.max(area.x + 24, (petWindow ? petWindow.getBounds().x - 476 : area.x + 24)),
+    y: Math.max(area.y + 24, area.y + area.height - 634),
+    frame: false,
+    transparent: false,
+    resizable: false,
+    maximizable: false,
+    minimizable: false,
+    show: false,
+    backgroundColor: '#FFF9F0',
+    title: '阿拉斯加 · 钱包与对话',
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false
+    }
+  });
+  panelWindow.setMenuBarVisibility(false);
+  panelWindow.setAlwaysOnTop(true, 'floating');
+  panelWindow.loadURL(`http://127.0.0.1:${appPort}/panel.html`);
+  // Do not wait for ready-to-show: transparent/no-frame windows can miss that
+  // event and leave the panel created but invisible.
+  panelWindow.show();
+  panelWindow.focus();
+  panelWindow.on('closed', () => { panelWindow = null; });
+}
+
+function openLegacyChat() {
+  const script = path.join(root, 'src', 'Open-Chat.ps1');
+  try {
+    spawn('C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe',
+      ['-STA', '-NoLogo', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', script, '-Root', root],
+      { detached: true, windowsHide: false, stdio: 'ignore' }).unref();
+  } catch (error) {
+    safeError('chat launch failed', error);
+  }
+}
+
+// Optional local .env. The file is never committed; values are only read at runtime.
+function loadEnvFile() {
+  try {
+    const envPath = path.join(__dirname, '.env');
+    if (!fs.existsSync(envPath)) return;
+    for (const line of fs.readFileSync(envPath, 'utf8').split(/\r?\n/)) {
+      const match = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*)\s*$/i);
+      if (!match) continue;
+      const value = match[2].replace(/^['"]|['"]$/g, '');
+      if (!process.env[match[1]]) process.env[match[1]] = value;
+    }
+  } catch (error) {
+    safeError('env load failed', error);
+  }
+}
+loadEnvFile();
+
+function chatUrl(base) {
+  const raw = String(base || '').replace(/\/+$/, '');
+  if (!raw) return '';
+  return /\/chat\/completions$/i.test(raw) ? raw : `${raw}/chat/completions`;
+}
+
+function getChatConfig() {
+  return {
+    baseUrl: process.env.LLM_API_URL || '',
+    apiKey: process.env.LLM_API_KEY || '',
+    model: process.env.LLM_MODEL || ''
+  };
+}
+
+async function probeOllama() {
+  try {
+    const response = await fetch('http://127.0.0.1:11434/api/tags', {
+      signal: AbortSignal.timeout(1800)
+    });
+    return response.ok;
+  } catch {
+    return false;
+  }
+}
+
+async function chatStatusPayload() {
+  const config = getChatConfig();
+  if (config.baseUrl && config.apiKey) {
+    return {
+      configured: true,
+      mode: 'remote',
+      message: `已配置远程模型：${config.model || '默认模型'}；密钥只在主进程读取。`,
+      model: config.model || '',
+      endpoint: config.baseUrl
+    };
+  }
+  if (await probeOllama()) {
+    return {
+      configured: true,
+      mode: 'ollama',
+      message: `已连接本地 Ollama${config.model ? `：${config.model}` : '；默认模型 llama3.2'}。不联网，也不使用 API Key。`,
+      model: config.model || 'llama3.2',
+      endpoint: 'http://127.0.0.1:11434'
+    };
+  }
+  return {
+    configured: false,
+    mode: 'none',
+    message: '还没有可用模型。新建 .env 填 LLM_API_URL / LLM_API_KEY / LLM_MODEL，或启动本地 Ollama 后重试。',
+    model: config.model || '',
+    endpoint: config.baseUrl || ''
+  };
+}
+
+async function sendChat(messages) {
+  const config = getChatConfig();
+  const hasRemote = Boolean(config.baseUrl && config.apiKey);
+  const baseUrl = hasRemote ? config.baseUrl : 'http://127.0.0.1:11434/v1';
+  const model = config.model || (hasRemote ? 'gpt-4o-mini' : 'llama3.2');
+  const url = chatUrl(baseUrl);
+  const body = {
+    model,
+    messages: messages.slice(-12),
+    temperature: 0.7,
+    // GLM / DeepSeek 等会先消耗一段 reasoning token；预算太小会只剩空 content。
+    max_tokens: Math.max(800, Number(process.env.LLM_MAX_TOKENS) || 1200),
+    stream: false
+  };
+  const headers = { 'Content-Type': 'application/json' };
+  if (hasRemote) headers.Authorization = `Bearer ${config.apiKey}`;
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(45000)
+    });
+    const text = await response.text();
+    let data = null;
+    try { data = JSON.parse(text); } catch {}
+    if (!response.ok) {
+      const detail = data && data.error && (data.error.message || data.error) || text;
+      return { ok: false, error: `模型接口返回 ${response.status}：${String(detail).slice(0, 180)}` };
+    }
+    const content = data && data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content;
+    if (!content) return { ok: false, error: '模型返回了空内容。' };
+    return { ok: true, content: String(content), model };
+  } catch (error) {
+    return {
+      ok: false,
+      error: hasRemote
+        ? `连接远程模型失败：${error.message}`
+        : '本地 Ollama 没连上。请先启动 Ollama，或用 .env 配置远程模型。'
+    };
+  }
+}
+
+function readState() {
+  const usage = readLatestUsage();
+  const delta = lastTotal === null ? 0 : Math.max(0, Number(usage.totalTokens) - lastTotal);
+  if (lastTotal !== null && Number(usage.totalTokens) < lastTotal) {
+    lastTotal = Number(usage.totalTokens);
+  }
+  const payload = Object.assign({}, usage, {
+    delta,
+    lastTotal,
+    settings: readSettings()
+  });
+  lastTotal = Number(usage.totalTokens);
+  lastUsage = payload;
+  if (petWindow && !petWindow.isDestroyed()) petWindow.webContents.send('pet-state', payload);
+  if (panelWindow && !panelWindow.isDestroyed()) panelWindow.webContents.send('pet-state', payload);
+  return payload;
+}
+
+function makeTrayIcon() {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32"><circle cx="16" cy="17" r="13" fill="#FFF0D4"/><circle cx="10" cy="8" r="5" fill="#FFF0D4"/><circle cx="22" cy="8" r="5" fill="#FFF0D4"/><circle cx="11" cy="16" r="3" fill="#2B1B16"/><circle cx="21" cy="16" r="3" fill="#2B1B16"/><circle cx="16" cy="21" r="2.5" fill="#F28C86"/></svg>`;
+  return nativeImage.createFromDataURL(`data:image/svg+xml;base64,${Buffer.from(svg).toString('base64')}`);
+}
+
+function buildTray() {
+  tray = new Tray(makeTrayIcon());
+  tray.setToolTip('阿拉斯加 · AI token 小桌宠');
+  const menu = Menu.buildFromTemplate([
+    { label: '显示阿拉斯加', click: () => { if (petWindow) { petWindow.show(); petWindow.setAlwaysOnTop(true, 'screen-saver'); petWindow.moveTop(); } } },
+    { label: '钱包 / 对话', click: createPanelWindow },
+    { label: '打开 AI 对话', click: openLegacyChat },
+    { label: '阿拉斯加大小', submenu: [
+      { label: '小', click: () => applyPetSize('small') },
+      { label: '中', click: () => applyPetSize('medium') },
+      { label: '大', click: () => applyPetSize('large') }
+    ] },
+    { type: 'separator' },
+    { label: '退出', click: () => app.quit() }
+  ]);
+  tray.setContextMenu(menu);
+  tray.on('double-click', () => { if (petWindow) petWindow.show(); });
+}
+
+ipcMain.on('hit-test', (_event, hit) => {
+  if (!petWindow || petWindow.isDestroyed()) return;
+  // Only the rendered pet (plus its clickable DOM overlays) should take the mouse.
+  petWindow.setIgnoreMouseEvents(!hit, { forward: true });
+});
+
+ipcMain.on('drag-start', () => {
+  if (!petWindow || petWindow.isDestroyed()) return;
+  dragging = true;
+  petWindow.setIgnoreMouseEvents(false);
+  // Use the native cursor position, not renderer screenX/screenY. This is the
+  // DIP coordinate Electron positions windows in, including at 125% scaling.
+  const cursor = screen.getCursorScreenPoint();
+  const bounds = petWindow.getBounds();
+  dragLock = { width: bounds.width, height: bounds.height };
+  dragOffset = { x: cursor.x - bounds.x, y: cursor.y - bounds.y };
+});
+
+ipcMain.on('drag-move', () => {
+  if (!petWindow || petWindow.isDestroyed() || !dragging || !dragLock) return;
+  const cursor = screen.getCursorScreenPoint();
+  const bounds = petWindow.getBounds();
+  const next = clampToWorkArea(cursor.x - dragOffset.x, cursor.y - dragOffset.y, dragLock.width, dragLock.height);
+  petWindow.setPosition(next.x, next.y, false);
+  // Never let a move turn into a size change. Keep the window exactly as it
+  // was when the drag began; otherwise the transparent window becomes a large
+  // invisible blocker and the pet appears to grow under the cursor.
+  const actual = petWindow.getBounds();
+  if (actual.width !== dragLock.width || actual.height !== dragLock.height) {
+    petWindow.setBounds({ x: next.x, y: next.y, width: dragLock.width, height: dragLock.height }, false);
+  }
+});
+
+ipcMain.on('drag-end', () => {
+  dragging = false;
+  dragLock = null;
+});
+
+ipcMain.on('open-panel', (_event, tab) => {
+  safeLog('[pet] open-panel', tab || 'balance');
+  createPanelWindow();
+  if (panelWindow) panelWindow.webContents.send('panel-tab', tab || 'balance');
+});
+
+ipcMain.on('demo-feed', (_event, tier) => {
+  if (petWindow && !petWindow.isDestroyed()) petWindow.webContents.send('demo-feed', tier);
+});
+
+function applyPetSize(size) {
+  if (!petWindow || petWindow.isDestroyed()) return;
+  if (!PET_SIZES[size]) return;
+  if (dragging) return;
+  petSize = size;
+  const dims = petDims();
+  const bounds = petWindow.getBounds();
+  const next = clampToWorkArea(bounds.x, bounds.y, dims.width, dims.height);
+  // Release the old min/max lock, apply the exact new size without animation,
+  // then lock it again so a drag can never change the window dimensions.
+  petWindow.setMinimumSize(0, 0);
+  petWindow.setMaximumSize(9999, 9999);
+  petWindow.setBounds({ x: next.x, y: next.y, width: dims.width, height: dims.height }, false);
+  petWindow.setMinimumSize(dims.width, dims.height);
+  petWindow.setMaximumSize(dims.width, dims.height);
+  petWindow.webContents.send('pet-resized', dims);
+}
+
+ipcMain.on('resize-pet', (_event, size) => applyPetSize(size));
+
+ipcMain.on('open-chat', openLegacyChat);
+ipcMain.on('quit-app', () => app.quit());
+ipcMain.on('panel-close', () => { if (panelWindow) panelWindow.hide(); });
+ipcMain.on('panel-minimize', () => { if (panelWindow) panelWindow.hide(); });
+ipcMain.on('get-state', () => readState());
+ipcMain.on('open-external', (_event, url) => { if (url && url.startsWith('http')) shell.openExternal(url); });
+ipcMain.handle('chat-status', async () => chatStatusPayload());
+ipcMain.handle('chat-send', async (_event, payload) => {
+  const raw = payload && Array.isArray(payload.messages) ? payload.messages : [];
+  const messages = raw
+    .filter((message) => message && (message.role === 'user' || message.role === 'assistant'))
+    .map((message) => ({ role: message.role, content: String(message.content || '').slice(0, 4000) }))
+    .filter((message) => message.content.trim());
+  if (!messages.length) return { ok: false, error: '还没有可发送的内容。' };
+  return sendChat(messages);
+});
+
+if (!app.requestSingleInstanceLock()) {
+  app.quit();
+}
+app.on('second-instance', () => {
+  if (petWindow && !petWindow.isDestroyed()) {
+    petWindow.show();
+    petWindow.setAlwaysOnTop(true, 'screen-saver');
+    petWindow.moveTop();
+  }
+});
+
+app.whenReady().then(async () => {
+  await session.defaultSession.clearCache();
+  await startAppServer();
+  createPetWindow();
+  buildTray();
+  setTimeout(() => { readState(); }, 900);
+  stateTimer = setInterval(readState, 1600);
+  app.on('activate', () => { if (!petWindow) createPetWindow(); });
+}).catch((error) => {
+  safeError('startup failed', error);
+  app.quit();
+});
+
+app.on('before-quit', () => {
+  if (stateTimer) clearInterval(stateTimer);
+  if (appServer) appServer.close();
+});
+app.on('window-all-closed', () => { /* keep tray alive */ });

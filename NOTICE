@@ -1,0 +1,28 @@
+# NOTICE
+
+Alaska Pet / 阿拉斯加 · AI Token 桌面宠物
+
+## 代码
+
+本仓库代码采用 MIT License，见 `LICENSE`。
+
+## 第三方依赖
+
+- **Electron** — MIT License — https://github.com/electron/electron
+- **Three.js** — MIT License — https://github.com/mrdoob/three.js
+- **Blender** — GPL（仅作为本地建模工具使用，不随仓库分发）
+- **Node.js** — MIT-style license
+
+## 模型与动作资产
+
+`app/assets/lulu.glb`、`model/lulu_static.blend` 及 `model/build_cat.py` 中的模型、骨骼与动画由本项目制作。  
+正式开源发布前，模型与动作资产建议单独采用 **CC BY 4.0** 或 **CC0**；当前仓库先保留所有权利，待发布时确认。
+
+## 参考素材
+
+用户提供的参考视频、截图和第三方角色素材仅用于风格研究，**没有**打包进 `app/assets`，也不随本仓库发布。  
+如果你要复用别人的角色、贴图、动作或音效，请先取得授权并在 NOTICE 中注明来源。
+
+## API
+
+OpenAI、OpenCSG、Ollama、DeepSeek、智谱 GLM 等名称和接口归各自权利人所有；本项目只通过用户配置的 OpenAI 兼容接口调用，不包含它们的模型权重。

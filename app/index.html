@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>阿拉斯加</title>
+<link rel="stylesheet" href="./style.css">
+</head>
+<body>
+  <canvas id="scene"></canvas>
+  <div id="bubble" class="bubble"><b id="bubbleTitle">阿拉斯加</b><span id="bubbleText"></span></div>
+  <div id="hearts" aria-hidden="true"></div>
+  <div id="hud" class="hud">
+    <div class="hud-pill"><span id="hudTokens">0 tok</span><span class="sep"></span><span id="hudBudget">¥10.00</span></div>
+    <div id="hudMeta" class="hud-meta">等待会话</div>
+  </div>
+  <div id="hint" class="hint">双击看钱包 · 右键菜单</div>
+  <div id="loading" class="loading">阿拉斯加正在醒来…</div>
+  <script>
+    window.addEventListener('error', function (e) {
+      var el = document.getElementById('loading');
+      if (el) el.textContent = '出错了：' + (e.message || 'unknown');
+    });
+    window.addEventListener('unhandledrejection', function (e) {
+      var el = document.getElementById('loading');
+      if (el) el.textContent = '出错了：' + (e.reason && e.reason.message ? e.reason.message : e.reason);
+    });
+  </script>
+  <script type="module" src="./pet.js"></script>
+</body>
+</html>
