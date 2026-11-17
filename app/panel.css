@@ -107,6 +107,16 @@ main::-webkit-scrollbar-thumb { background: #E2C8AE; border-radius: 99px; border
   background: var(--card); border: 1px solid var(--line);
 }
 .stat-card.accent { background: #F9EBD9; border-color: #EACBA8; }
+.stat-card.wide {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  background: #FFF7EA;
+}
+.stat-card.wide strong { margin-top: 0; font-size: 16px; color: #8B6245; }
+.stat-card.wide small { margin-top: 0; text-align: right; }
 .stat-label { display: block; font-size: 9px; color: #9C7D65; letter-spacing: .06em; }
 .stat-card strong { display: block; margin-top: 4px; font-size: 20px; letter-spacing: -.02em; }
 .stat-card small { display: block; margin-top: 4px; font-size: 9px; color: #A08873; }

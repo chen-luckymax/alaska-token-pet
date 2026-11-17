@@ -1,119 +1,168 @@
 const fs = require('fs');
 const path = require('path');
-const os = require('os');
 
 const root = path.resolve(__dirname, '..', 'Token-Cat');
-const settingsPath = path.join(root, 'config', 'settings.json');
+const DEFAULT_SETTINGS = {
+  budget: { currency: 'CNY', dailyLimit: 10 },
+  pricing: { inputPerMillion: 2, outputPerMillion: 8, cachedInputPerMillion: 0.5 },
+  contextWindow: 131072
+};
 
-function readSettings() {
-  const defaults = {
-    budget: { currency: 'CNY', initialBalance: 50, dailyLimit: 10 },
-    pricing: { inputPerMillion: 2, outputPerMillion: 8, cachedInputPerMillion: 0.5 }
-  };
+function readSettings(settingsPath) {
+  const file = settingsPath || path.join(__dirname, 'config', 'settings.json');
+  const settings = JSON.parse(JSON.stringify(DEFAULT_SETTINGS));
   try {
-    return Object.assign(defaults, JSON.parse(fs.readFileSync(settingsPath, 'utf8')));
-  } catch {
-    return defaults;
-  }
+    const stored = JSON.parse(fs.readFileSync(file, 'utf8'));
+    if (stored && stored.budget) Object.assign(settings.budget, stored.budget);
+    if (stored && stored.pricing) Object.assign(settings.pricing, stored.pricing);
+    if (stored && Number(stored.contextWindow) > 0) settings.contextWindow = Number(stored.contextWindow);
+  } catch {}
+  return settings;
 }
 
-function walkJsonl(dir, depth = 0, out = []) {
-  if (depth > 5) return out;
-  let entries = [];
-  try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return out; }
-  for (const entry of entries) {
-    const full = path.join(dir, entry.name);
+function dayKey(date) {
+  const value = date instanceof Date ? date : new Date(date);
+  return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, '0')}-${String(value.getDate()).padStart(2, '0')}`;
+}
+
+function toInt(value) {
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0 ? Math.floor(number) : 0;
+}
+
+function normalizeUsage(usage) {
+  const prompt = toInt(usage && (usage.prompt_tokens ?? usage.input_tokens));
+  const completion = toInt(usage && (usage.completion_tokens ?? usage.output_tokens));
+  const cached = toInt(usage && (usage.cached_input_tokens
+    ?? (usage.prompt_tokens_details && usage.prompt_tokens_details.cached_tokens)));
+  const reasoning = toInt(usage && (usage.reasoning_tokens
+    ?? (usage.completion_tokens_details && usage.completion_tokens_details.reasoning_tokens)));
+  const total = toInt(usage && usage.total_tokens) || prompt + completion;
+  return { prompt, completion, cached, reasoning, total };
+}
+
+function costFor(usage, pricing) {
+  const billableInput = Math.max(0, usage.prompt - usage.cached);
+  const inputCost = billableInput * Number(pricing.inputPerMillion || 0);
+  const cachedCost = usage.cached * Number(pricing.cachedInputPerMillion || 0);
+  const outputCost = usage.completion * Number(pricing.outputPerMillion || 0);
+  return (inputCost + cachedCost + outputCost) / 1000000;
+}
+
+function loadLedger(file) {
+  try {
+    const data = JSON.parse(fs.readFileSync(file, 'utf8'));
+    if (data && Array.isArray(data.entries)) {
+      return { version: 1, entries: data.entries.filter((entry) => entry && Number(entry.totalTokens) > 0) };
+    }
+  } catch {}
+  return { version: 1, entries: [] };
+}
+
+function saveLedger(file, ledger) {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const temp = `${file}.${process.pid}.tmp`;
+  const text = JSON.stringify(ledger, null, 2);
+  try {
+    fs.writeFileSync(temp, text, 'utf8');
     try {
-      if (entry.isDirectory()) walkJsonl(full, depth + 1, out);
-      else if (entry.name.toLowerCase().endsWith('.jsonl')) out.push(full);
-    } catch {}
+      fs.renameSync(temp, file);
+    } catch {
+      // Windows may refuse replacing an existing file; write directly as fallback.
+      fs.writeFileSync(file, text, 'utf8');
+      try { fs.unlinkSync(temp); } catch {}
+    }
+  } catch (error) {
+    try { fs.unlinkSync(temp); } catch {}
+    throw error;
   }
-  return out;
 }
 
-function findSessionFiles() {
-  const roots = [
-    path.join(os.homedir(), '.csgclaw', 'agents'),
-    path.join(os.homedir(), '.codex', 'sessions')
-  ];
-  const cutoff = Date.now() - 3 * 24 * 60 * 60 * 1000;
-  return roots.flatMap((dir) => walkJsonl(dir))
-    .map((file) => {
-      try { return { file, mtime: fs.statSync(file).mtimeMs }; } catch { return null; }
-    })
-    .filter((item) => item && item.mtime >= cutoff)
-    .sort((a, b) => b.mtime - a.mtime);
-}
+function createUsageTracker(options = {}) {
+  const dataDir = options.dataDir || path.join(__dirname, 'data');
+  const settingsPath = options.settingsPath || path.join(__dirname, 'config', 'settings.json');
+  const ledgerPath = path.join(dataDir, 'usage-ledger.json');
+  const sessionId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  const sessionStartedAt = new Date().toISOString();
+  let ledger = loadLedger(ledgerPath);
 
-function readLatestUsage() {
-  const settings = readSettings();
-  const files = findSessionFiles();
-  const latest = files[0];
-  if (!latest) {
+  function snapshot() {
+    const settings = readSettings(settingsPath);
+    const pricing = settings.pricing;
+    const now = new Date();
+    const today = dayKey(now);
+    const todayEntries = ledger.entries.filter((entry) => entry.day === today);
+    const sessionEntries = ledger.entries.filter((entry) => entry.sessionId === sessionId);
+    const todayTokens = todayEntries.reduce((sum, entry) => sum + toInt(entry.totalTokens), 0);
+    const todayCost = todayEntries.reduce((sum, entry) => sum + Number(entry.cost || 0), 0);
+    const sessionTokens = sessionEntries.reduce((sum, entry) => sum + toInt(entry.totalTokens), 0);
+    const sessionCost = sessionEntries.reduce((sum, entry) => sum + Number(entry.cost || 0), 0);
+    const last = ledger.entries[ledger.entries.length - 1] || null;
+    const contextWindow = Number(settings.contextWindow || 0);
+    const lastInput = last ? toInt(last.promptTokens) : 0;
+    const contextPercent = contextWindow > 0 ? Math.min(100, (lastInput / contextWindow) * 100) : 0;
+    const dailyLimit = Number(settings.budget.dailyLimit || 10);
+    const budgetRemaining = Math.max(0, dailyLimit - todayCost);
+
     return {
-      ok: false,
-      totalTokens: 0,
-      inputTokens: 0,
-      outputTokens: 0,
-      cachedTokens: 0,
-      cost: 0,
-      budgetRemaining: settings.budget.dailyLimit,
-      contextPercent: 0,
-      contextRemaining: 0,
-      contextWindow: 0,
-      source: '等待 Codex / CSG 会话',
-      updatedAt: new Date().toISOString()
+      ok: todayEntries.length > 0,
+      totalTokens: todayTokens,
+      sessionTokens,
+      todayTokens,
+      inputTokens: todayEntries.reduce((sum, entry) => sum + toInt(entry.promptTokens), 0),
+      outputTokens: todayEntries.reduce((sum, entry) => sum + toInt(entry.completionTokens), 0),
+      cachedTokens: todayEntries.reduce((sum, entry) => sum + toInt(entry.cachedTokens), 0),
+      reasoningTokens: todayEntries.reduce((sum, entry) => sum + toInt(entry.reasoningTokens), 0),
+      cost: todayCost,
+      sessionCost,
+      todayCost,
+      budgetRemaining,
+      contextPercent,
+      contextRemaining: Math.max(0, contextWindow - lastInput),
+      contextWindow,
+      source: last
+        ? `${last.model || '模型'} · 本次 App 对话`
+        : '本次 App 对话',
+      lastModel: last ? last.model || '' : '',
+      updatedAt: last ? last.at : now.toISOString(),
+      currency: settings.budget.currency || 'CNY',
+      dailyLimit,
+      accountBalance: null,
+      accountBalanceAvailable: false,
+      accountBalanceNote: 'OpenCSG 账户余额接口未接入',
+      settings,
+      sessionId,
+      sessionStartedAt,
+      ledgerPath
     };
   }
 
-  let text = '';
-  try { text = fs.readFileSync(latest.file, 'utf8'); } catch {}
-  let usage = null;
-  let contextWindow = 0;
-  const lines = text.split(/\r?\n/);
-  for (let i = lines.length - 1; i >= 0; i -= 1) {
-    const line = lines[i];
-    if (!line.includes('token_count')) continue;
-    try {
-      const item = JSON.parse(line);
-      const info = item && item.payload && item.payload.info;
-      if (info && info.total_token_usage) {
-        usage = info;
-        contextWindow = Number(info.model_context_window || 0);
-        break;
-      }
-    } catch {}
+  function recordChat({ usage, model, source = 'app-chat' } = {}) {
+    const normalized = normalizeUsage(usage);
+    if (normalized.total <= 0) return { recorded: false, state: snapshot() };
+    const settings = readSettings(settingsPath);
+    const at = new Date();
+    const entry = {
+      id: `${at.getTime().toString(36)}-${Math.random().toString(36).slice(2, 7)}`,
+      at: at.toISOString(),
+      day: dayKey(at),
+      sessionId,
+      model: String(model || '').slice(0, 80),
+      source: String(source || 'app-chat').slice(0, 80),
+      promptTokens: normalized.prompt,
+      completionTokens: normalized.completion,
+      cachedTokens: normalized.cached,
+      reasoningTokens: normalized.reasoning,
+      totalTokens: normalized.total,
+      cost: costFor(normalized, settings.pricing)
+    };
+    ledger.entries.push(entry);
+    if (ledger.entries.length > 5000) ledger.entries.splice(0, ledger.entries.length - 5000);
+    saveLedger(ledgerPath, ledger);
+    return { recorded: true, entry, state: snapshot() };
   }
 
-  const total = usage ? usage.total_token_usage : { input_tokens: 0, output_tokens: 0, cached_input_tokens: 0, total_tokens: 0 };
-  const input = Number(total.input_tokens || 0);
-  const output = Number(total.output_tokens || 0);
-  const cached = Number(total.cached_input_tokens || 0);
-  const totalTokens = Number(total.total_tokens || input + output);
-  const pricing = settings.pricing;
-  const cost = ((input - cached) * Number(pricing.inputPerMillion || 0)
-    + cached * Number(pricing.cachedInputPerMillion || 0)
-    + output * Number(pricing.outputPerMillion || 0)) / 1000000;
-  const last = usage && usage.last_token_usage ? usage.last_token_usage : {};
-  const contextInput = Number(last.input_tokens || 0);
-  const contextPercent = contextWindow > 0 ? Math.min(100, (contextInput / contextWindow) * 100) : 0;
-
-  return {
-    ok: true,
-    totalTokens,
-    inputTokens: input,
-    outputTokens: output,
-    cachedTokens: cached,
-    cost,
-    budgetRemaining: Math.max(0, Number(settings.budget.dailyLimit || 10) - cost),
-    contextPercent,
-    contextRemaining: Math.max(0, contextWindow - contextInput),
-    contextWindow,
-    source: path.basename(latest.file),
-    sessionPath: latest.file,
-    updatedAt: new Date().toISOString(),
-    currency: settings.budget.currency || 'CNY'
-  };
+  return { recordChat, snapshot, sessionId, ledgerPath, settingsPath };
 }
 
-module.exports = { readLatestUsage, readSettings, root };
+module.exports = { createUsageTracker, readSettings, dayKey, root };

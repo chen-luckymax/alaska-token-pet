@@ -1,14 +1,14 @@
 {
   "name": "lulu-pet",
   "productName": "阿拉斯加",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "description": "阿拉斯加 · 3D AI token 桌面宠物",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
     "dev": "electron . --dev",
     "check": "node --check main.js && node --check preload.js && node --check usage.js && node --check app/pet.js && node --check app/panel.js",
-    "test": "node test/check-glb.js && node test/check-files.js",
+    "test": "node test/check-glb.js && node test/check-files.js && node test/check-usage.js",
     "model:build": "tools\\blender-4.5.16-windows-x64\\blender.exe --background --python model\\build_cat.py"
   },
   "keywords": ["desktop-pet", "threejs", "electron", "blender", "ai", "glm"],

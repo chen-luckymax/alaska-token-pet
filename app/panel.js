@@ -12,26 +12,35 @@ api.onPanelTab((tab) => setTab(tab === 'chat' ? 'chat' : 'balance'));
 function fmt(n) {
   return Number(n || 0).toLocaleString('zh-CN', { maximumFractionDigits: 0 });
 }
-function money(n) {
-  return `¥${Number(n || 0).toFixed(2)}`;
+function money(n, digits) {
+  const value = Number(n || 0);
+  if (value === 0) return '¥0.00';
+  const precision = digits !== undefined ? digits : (Math.abs(value) < 1 ? 4 : 2);
+  return `¥${value.toFixed(precision).replace(/\.?0+$/, '')}`;
 }
 
 function render(state) {
   if (!state) return;
   const tokens = Number(state.totalTokens || 0);
   document.getElementById('bigTokens').textContent = fmt(tokens);
-  document.getElementById('costValue').textContent = money(state.cost);
-  document.getElementById('budgetValue').textContent = money(state.budgetRemaining);
-  const limit = state.settings && state.settings.budget ? state.settings.budget.dailyLimit : 10;
-  document.getElementById('budgetHint').textContent = `上限 ${money(limit)}`;
+  document.getElementById('costValue').textContent = money(state.cost, 4);
+  document.getElementById('budgetValue').textContent = money(state.budgetRemaining, 4);
+  const limit = state.dailyLimit || (state.settings && state.settings.budget ? state.settings.budget.dailyLimit : 10);
+  document.getElementById('budgetHint').textContent = `上限 ${money(limit)} · 本地预算，不是账户余额`;
+  document.getElementById('accountBalance').textContent = state.accountBalanceAvailable
+    ? money(state.accountBalance)
+    : '未接入';
+  document.getElementById('accountBalanceNote').textContent = state.accountBalanceAvailable
+    ? 'OpenCSG 账户余额'
+    : (state.accountBalanceNote || 'OpenCSG 余额接口暂未配置');
   document.getElementById('sourceLine').textContent = state.ok
-    ? `${state.source} · ${new Date(state.updatedAt).toLocaleTimeString('zh-CN', { hour12: false })}`
-    : '还没有找到 Codex / CSG 会话，先在终端跑一轮任务。';
+    ? `${state.source} · 本次会话 ${fmt(state.sessionTokens)} tokens · ${new Date(state.updatedAt).toLocaleTimeString('zh-CN', { hour12: false })}`
+    : '本次 App 对话还没有记录；发一条消息后开始记账。';
   const pct = Math.min(100, Math.max(0, Number(state.contextPercent || 0)));
   document.getElementById('contextFill').style.width = `${pct}%`;
   document.getElementById('contextText').textContent = `${pct.toFixed(1)}%`;
   const badge = document.getElementById('okBadge');
-  badge.textContent = state.ok ? '已连接' : '等待中';
+  badge.textContent = state.ok ? '已记账' : '等待首次对话';
   badge.style.background = state.ok ? '#EDF3EC' : '#F7EEE3';
   badge.style.color = state.ok ? '#5D806B' : '#9A7C63';
 }
@@ -88,6 +97,16 @@ async function sendChatMessage() {
       appendChat('bot', result.content);
       chatMessages.push({ role: 'assistant', content: result.content });
       if (chatMessages.length > 12) chatMessages.splice(0, chatMessages.length - 12);
+      if (result.state) render(result.state);
+      const hint = document.getElementById('chatHint');
+      if (result.usageRecorded) {
+        const used = Number(result.usage && result.usage.total_tokens) || 0;
+        hint.textContent = `本次 ${fmt(used)} tokens · 已记账`;
+        setTimeout(() => { hint.textContent = 'Enter 发送 · Shift+Enter 换行'; }, 5000);
+      } else if (result.usageMissing) {
+        hint.textContent = '模型没有返回 usage，本次未记账';
+        setTimeout(() => { hint.textContent = 'Enter 发送 · Shift+Enter 换行'; }, 5000);
+      }
     } else {
       appendChat('error', (result && result.error) || '模型没有返回内容。');
     }

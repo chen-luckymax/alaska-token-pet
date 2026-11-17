@@ -1,6 +1,6 @@
 # 阿拉斯加 · AI Token 桌面宠物
 
-一个跑在 Windows 桌面上的 3D 抽象小猫桌宠：透明窗口、可拖动、可调大小，会呼吸、看左右、伸懒腰、打哈欠、洗脸，也会吃冰激凌和饭。
+一个跑在 Windows 桌面上的 3D 抽象小猫桌宠：透明窗口、可拖动、可调大小，会呼吸、看左右、伸懒腰、打哈欠，也会吃冰激凌和饭。
 
 > 当前是本地原型版，还没有发布安装包；先在源码目录运行。
 
@@ -14,7 +14,7 @@
 - **待机动作**：呼吸、东张西望、晃身、伸懒腰、打哈欠。
 - **互动**：单击会眯眼、跳一下，并随机说一句话；双击打开钱包 / 对话面板。
 - **吃东西**：冰激凌、小饼干、西瓜、水果米饭；有下颌开合、口腔、舌头、咬合、食物缩小和碎屑。
-- **token 钱包**：从本机 Codex / CSG 会话日志读取 token 和估算花费。
+- **token 钱包**：记录 App 内每次 `glm-5.2` 对话返回的真实 `usage`，显示今日 token、估算花费、本地预算剩余；“账户余额”在未接 OpenCSG 余额接口时明确标为“未接入”。
 - **AI 对话**：面板里可以直接聊天；支持 OpenAI 兼容接口，也可以用本机 Ollama 兜底。
 
 ## 快速开始
@@ -68,6 +68,14 @@ ollama pull llama3.2
 - GLM / DeepSeek 会先花 token 在 `reasoning`；`max_tokens` 低于 800 时 `message.content` 可能为空，所以默认预算为 1200。
 - 网关的思考字段是 `message.reasoning`，不是 `reasoning_content`；界面只显示 `message.content`。
 
+### Token 记账边界
+
+- 每发一条对话，主进程从模型响应的 `usage.prompt_tokens` / `completion_tokens` / `total_tokens` 记账。
+- 账本保存在 Electron 的 `userData/usage/usage-ledger.json`，重启后今日累计仍在；本次会话 token 从 App 启动开始算。
+- `dailyLimit` 和价格表在 `config/settings.json`；默认价格表是本地估算，不代表 OpenCSG 账单，真实费用以控制台为准。
+- `账户余额` 目前没有接 OpenCSG 余额接口，面板固定显示“未接入”，不会拿本地预算冒充账户余额。
+- 相关测试：`npm test` 会跑 `test/check-usage.js`；`test/e2e-usage.js` 用真实模型响应验证 token 是否进入面板。
+
 ## 检查与测试
 
 ```powershell
@@ -80,7 +88,7 @@ npm test        # GLB 动画/骨骼结构 + 仓库必要文件
 ```text
 main.js                 Electron 主进程：窗口、托盘、拖拽、AI 请求
 preload.js              IPC 白名单
-usage.js                读取本机 token 会话
+usage.js                记录 App 对话 usage、本地预算和每日账本
 app/                    桌宠与面板页面、Three.js 资源
 model/build_cat.py      Blender 建模、骨骼、动作、GLB 导出
 app/assets/lulu.glb     当前模型
@@ -122,7 +130,7 @@ tools\blender-4.5.16-windows-x64\blender.exe --background --python model\build_c
 
 ## 隐私
 
-- token 数据来自本机日志，不上传。
+- token 账本只写本机 `userData`，不上传；Codex / CSG 历史日志不再作为 App 对话的统计来源。
 - AI 对话只在点击发送时请求所配置的模型；使用 Ollama 时不出本机。
 - API Key 只从 `.env` 或环境变量读取，不写入页面和日志。
 

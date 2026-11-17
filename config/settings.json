@@ -1,0 +1,12 @@
+{
+  "budget": {
+    "currency": "CNY",
+    "dailyLimit": 10
+  },
+  "pricing": {
+    "inputPerMillion": 2,
+    "outputPerMillion": 8,
+    "cachedInputPerMillion": 0.5
+  },
+  "contextWindow": 131072
+}

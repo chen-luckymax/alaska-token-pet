@@ -5,7 +5,7 @@ const path = require('path');
 const root = path.join(__dirname, '..');
 const read = (name) => fs.readFileSync(path.join(root, name), 'utf8');
 
-for (const file of ['README.md', 'LICENSE', 'NOTICE', 'CHANGELOG.md', 'ARCHITECTURE.md', '.env.example', '.gitignore']) {
+for (const file of ['README.md', 'LICENSE', 'NOTICE', 'CHANGELOG.md', 'ARCHITECTURE.md', '.env.example', '.gitignore', 'config/settings.json', 'test/check-usage.js']) {
   assert.ok(fs.existsSync(path.join(root, file)), `missing ${file}`);
 }
 

@@ -3,7 +3,7 @@ const path = require('path');
 const http = require('http');
 const fs = require('fs');
 const { spawn } = require('child_process');
-const { readLatestUsage, readSettings, root } = require('./usage');
+const { createUsageTracker, root } = require('./usage');
 
 // 终端/启动器关闭后 stdout 会变成断管，console.log 在异步回调里抛 EPIPE
 // 会触发 Electron 的“主进程 JavaScript 错误”弹窗。日志写失败只应丢弃，不应影响桌宠。
@@ -34,6 +34,9 @@ let dragging = false;
 let dragOffset = { x: 0, y: 0 };
 let dragLock = null;
 let stateTimer = null;
+let usageTracker = null;
+let panelDismissed = false;
+let panelWatchdog = null;
 
 const PET_SIZES = {
   small: { width: 150, height: 198 },
@@ -168,6 +171,9 @@ function createPetWindow() {
         setTimeout(() => { click('mouseDown'); click('mouseUp'); safeLog('[pet] test double click sent'); }, 110);
       }, 1800);
     }
+    if (process.argv.includes('--test-panel')) {
+      setTimeout(() => { if (!panelWindow || panelWindow.isDestroyed()) createPanelWindow(); }, 1000);
+    }
     if (process.env.LULU_SNAPSHOT === '1' || process.argv.some((arg) => arg.startsWith('--snapshot'))) {
       const delayArg = process.argv.find((arg) => arg.startsWith('--snapshot-delay='));
       const delay = Number(process.env.LULU_SNAPSHOT_DELAY) || (delayArg ? Number(delayArg.split('=')[1]) : 4500);
@@ -196,6 +202,7 @@ function createPetWindow() {
 }
 
 function createPanelWindow() {
+  panelDismissed = false;
   if (panelWindow && !panelWindow.isDestroyed()) {
     panelWindow.show();
     panelWindow.focus();
@@ -212,7 +219,7 @@ function createPanelWindow() {
     resizable: false,
     maximizable: false,
     minimizable: false,
-    show: false,
+    show: true,
     backgroundColor: '#FFF9F0',
     title: '阿拉斯加 · 钱包与对话',
     webPreferences: {
@@ -224,23 +231,29 @@ function createPanelWindow() {
   panelWindow.setMenuBarVisibility(false);
   panelWindow.setAlwaysOnTop(true, 'floating');
   panelWindow.loadURL(`http://127.0.0.1:${appPort}/panel.html`);
-  panelWindow.once('ready-to-show', () => {
+  function revealPanel(reason) {
     if (!panelWindow || panelWindow.isDestroyed()) return;
     panelWindow.show();
+    panelWindow.setAlwaysOnTop(true, 'screen-saver');
+    panelWindow.moveTop();
     panelWindow.focus();
-    safeLog('[panel] ready-to-show');
+    safeLog('[panel] reveal', reason, 'visible', panelWindow.isVisible());
+  }
+  panelWindow.once('ready-to-show', () => {
+    revealPanel('ready-to-show');
   });
   panelWindow.webContents.once('did-finish-load', () => {
-    if (!panelWindow || panelWindow.isDestroyed()) return;
-    panelWindow.show();
-    panelWindow.focus();
-    safeLog('[panel] did-finish-load');
+    revealPanel('did-finish-load');
   });
-  // Do not wait for ready-to-show: transparent/no-frame windows can miss that
-  // event and leave the panel created but invisible.
+  // Some Windows/Electron combinations create the BrowserWindow but leave it
+  // hidden even after show(); reveal again after the first paint and after load.
   panelWindow.show();
   panelWindow.focus();
-  panelWindow.on('closed', () => { panelWindow = null; });
+  setTimeout(() => revealPanel('frame-1'), 300);
+  setTimeout(() => revealPanel('frame-2'), 1200);
+  panelWindow.on('hide', () => safeLog('[panel] hide'));
+  panelWindow.on('minimize', () => safeLog('[panel] minimize'));
+  panelWindow.on('closed', () => { safeLog('[panel] closed'); panelWindow = null; });
 }
 
 function openLegacyChat() {
@@ -357,7 +370,12 @@ async function sendChat(messages) {
     }
     const content = data && data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content;
     if (!content) return { ok: false, error: '模型返回了空内容。' };
-    return { ok: true, content: String(content), model };
+    return {
+      ok: true,
+      content: String(content),
+      model,
+      usage: data && data.usage ? data.usage : null
+    };
   } catch (error) {
     return {
       ok: false,
@@ -369,15 +387,39 @@ async function sendChat(messages) {
 }
 
 function readState() {
-  const usage = readLatestUsage();
-  const delta = lastTotal === null ? 0 : Math.max(0, Number(usage.totalTokens) - lastTotal);
+  const usage = usageTracker ? usageTracker.snapshot() : {
+    ok: false,
+    totalTokens: 0,
+    sessionTokens: 0,
+    todayTokens: 0,
+    inputTokens: 0,
+    outputTokens: 0,
+    cachedTokens: 0,
+    reasoningTokens: 0,
+    cost: 0,
+    sessionCost: 0,
+    todayCost: 0,
+    budgetRemaining: 10,
+    contextPercent: 0,
+    contextRemaining: 0,
+    contextWindow: 0,
+    source: '本次 App 对话',
+    updatedAt: new Date().toISOString(),
+    currency: 'CNY',
+    dailyLimit: 10,
+    accountBalance: null,
+    accountBalanceAvailable: false,
+    accountBalanceNote: 'OpenCSG 账户余额接口未接入',
+    settings: { budget: { dailyLimit: 10, currency: 'CNY' } }
+  };
+  let delta = lastTotal === null ? 0 : Math.max(0, Number(usage.totalTokens) - lastTotal);
   if (lastTotal !== null && Number(usage.totalTokens) < lastTotal) {
-    lastTotal = Number(usage.totalTokens);
+    // A new local day or a reset ledger: never interpret a drop as negative usage.
+    delta = 0;
   }
   const payload = Object.assign({}, usage, {
     delta,
-    lastTotal,
-    settings: readSettings()
+    lastTotal
   });
   lastTotal = Number(usage.totalTokens);
   lastUsage = payload;
@@ -480,8 +522,8 @@ ipcMain.on('resize-pet', (_event, size) => applyPetSize(size));
 
 ipcMain.on('open-chat', openLegacyChat);
 ipcMain.on('quit-app', () => app.quit());
-ipcMain.on('panel-close', () => { if (panelWindow) panelWindow.hide(); });
-ipcMain.on('panel-minimize', () => { if (panelWindow) panelWindow.hide(); });
+ipcMain.on('panel-close', () => { panelDismissed = true; if (panelWindow) panelWindow.hide(); });
+ipcMain.on('panel-minimize', () => { panelDismissed = true; if (panelWindow) panelWindow.hide(); });
 ipcMain.on('get-state', () => readState());
 ipcMain.on('open-external', (_event, url) => { if (url && url.startsWith('http')) shell.openExternal(url); });
 ipcMain.handle('chat-status', async () => chatStatusPayload());
@@ -492,7 +534,16 @@ ipcMain.handle('chat-send', async (_event, payload) => {
     .map((message) => ({ role: message.role, content: String(message.content || '').slice(0, 4000) }))
     .filter((message) => message.content.trim());
   if (!messages.length) return { ok: false, error: '还没有可发送的内容。' };
-  return sendChat(messages);
+  const result = await sendChat(messages);
+  if (result.ok && result.usage && usageTracker) {
+    const recorded = usageTracker.recordChat({ usage: result.usage, model: result.model });
+    result.usageRecorded = recorded.recorded;
+    if (!recorded.recorded) result.usageMissing = true;
+  } else if (result.ok) {
+    result.usageMissing = true;
+  }
+  result.state = readState();
+  return result;
 });
 
 if (!app.requestSingleInstanceLock()) {
@@ -507,12 +558,26 @@ app.on('second-instance', () => {
 });
 
 app.whenReady().then(async () => {
+  usageTracker = createUsageTracker({
+    dataDir: path.join(app.getPath('userData'), 'usage')
+  });
   await session.defaultSession.clearCache();
   await startAppServer();
   createPetWindow();
   buildTray();
   setTimeout(() => { readState(); }, 900);
   stateTimer = setInterval(readState, 1600);
+  // Windows can hide a freshly-created frameless window without emitting 'hide'.
+  // Keep an explicitly opened panel visible until the user closes it.
+  panelWatchdog = setInterval(() => {
+    if (!panelWindow || panelWindow.isDestroyed() || panelDismissed) return;
+    if (!panelWindow.isVisible()) {
+      panelWindow.show();
+      panelWindow.setAlwaysOnTop(true, 'screen-saver');
+      panelWindow.moveTop();
+      panelWindow.focus();
+    }
+  }, 2500);
   app.on('activate', () => { if (!petWindow) createPetWindow(); });
 }).catch((error) => {
   safeError('startup failed', error);
@@ -521,6 +586,7 @@ app.whenReady().then(async () => {
 
 app.on('before-quit', () => {
   if (stateTimer) clearInterval(stateTimer);
+  if (panelWatchdog) clearInterval(panelWatchdog);
   if (appServer) appServer.close();
 });
 app.on('window-all-closed', () => { /* keep tray alive */ });

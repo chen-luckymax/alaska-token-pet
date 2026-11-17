@@ -31,25 +31,30 @@
     <section id="tab-balance" class="tab-panel active">
       <div class="hero-card">
         <div class="hero-top">
-          <span class="eyebrow">本次会话</span>
+          <span class="eyebrow">今日已用</span>
           <span id="okBadge" class="badge">读取中</span>
         </div>
         <div class="token-line"><strong id="bigTokens">0</strong><span>tokens</span></div>
-        <p id="sourceLine" class="source-line">正在扫描 Codex / CSG 会话…</p>
+        <p id="sourceLine" class="source-line">发送一条对话后开始记账…</p>
         <div class="meter"><span id="contextFill"></span></div>
         <div class="meter-labels"><span>上下文</span><span id="contextText">0%</span></div>
       </div>
 
       <div class="stat-grid">
         <article class="stat-card">
-          <span class="stat-label">估算花费</span>
+          <span class="stat-label">今日估算花费</span>
           <strong id="costValue">¥0.00</strong>
-          <small>按当前价格表</small>
+          <small>按本地价格表</small>
         </article>
         <article class="stat-card accent">
-          <span class="stat-label">今日预算余额</span>
+          <span class="stat-label">本地预算剩余</span>
           <strong id="budgetValue">¥10.00</strong>
-          <small id="budgetHint">上限 ¥10.00</small>
+          <small id="budgetHint">上限 ¥10.00 · 非账户余额</small>
+        </article>
+        <article class="stat-card wide">
+          <span class="stat-label">账户余额</span>
+          <strong id="accountBalance">未接入</strong>
+          <small id="accountBalanceNote">OpenCSG 余额接口暂未配置</small>
         </article>
       </div>
 

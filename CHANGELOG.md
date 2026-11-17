@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.6.1 — 2026-11-17
+
+### Token 钱包
+
+- `chat-send` 不再丢弃模型响应里的 `usage`；按 `prompt_tokens` / `completion_tokens` / `total_tokens` 记录本次 App 对话。
+- 新增 `userData/usage/usage-ledger.json` 本地账本：今日累计跨重启保留，本次会话从 App 启动重新算。
+- 面板大数字改为“今日已用 tokens”，并显示“今日估算花费”和“本地预算剩余”。
+- 账户余额明确显示“未接入”，不再用本地 `dailyLimit` 冒充 OpenCSG 账户余额。
+- 新增 `config/settings.json`（本地预算、价格表、上下文窗口）和 `test/check-usage.js`。
+- 修复面板创建后被系统隐藏的问题：创建时直接可见，并加 watchdog / 重新 `show` 兜底。
+
+### 验证
+
+- 真实 `glm-5.2` 对话返回 `usage.total_tokens = 145`，面板从 `0` 变为 `145`，账本落盘。
+- `npm test` 覆盖真实记账、重启持久化、预算扣减和面板字段。
+
 ## 0.6.0 — 2026-11-17
 
 ### 修复
