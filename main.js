@@ -224,6 +224,18 @@ function createPanelWindow() {
   panelWindow.setMenuBarVisibility(false);
   panelWindow.setAlwaysOnTop(true, 'floating');
   panelWindow.loadURL(`http://127.0.0.1:${appPort}/panel.html`);
+  panelWindow.once('ready-to-show', () => {
+    if (!panelWindow || panelWindow.isDestroyed()) return;
+    panelWindow.show();
+    panelWindow.focus();
+    safeLog('[panel] ready-to-show');
+  });
+  panelWindow.webContents.once('did-finish-load', () => {
+    if (!panelWindow || panelWindow.isDestroyed()) return;
+    panelWindow.show();
+    panelWindow.focus();
+    safeLog('[panel] did-finish-load');
+  });
   // Do not wait for ready-to-show: transparent/no-frame windows can miss that
   // event and leave the panel created but invisible.
   panelWindow.show();
