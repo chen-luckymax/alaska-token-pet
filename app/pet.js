@@ -376,7 +376,7 @@ function updateFood(dt) {
 }
 
 // ---------- animation ----------
-const IDLES = ['Idle_Breathe', 'Idle_Look', 'Idle_Wiggle', 'Idle_Stretch', 'Idle_Yawn', 'Idle_Groom'];
+const IDLES = ['Idle_Breathe', 'Idle_Look', 'Idle_Wiggle', 'Idle_Stretch', 'Idle_Yawn'];
 let idleIndex = 0;
 
 function playAction(name, once, fade = 0.35) {
