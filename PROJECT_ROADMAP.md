@@ -80,12 +80,12 @@
 
 ### P0：影响“能不能日常用”
 1. **真实 token 用量来源**
-   现在更多是本地统计/演示数据。需要明确接入：
-   - Claude Code / OpenAI / 豆包等实际账单或本地日志
+   已接入 App 内 OpenCSG `glm-5.2` 的响应 `usage`，按日写入本地账本并显示今日 token / 估算花费 / 本地预算剩余。仍需补：
+   - OpenCSG 账户余额 / 账单接口（没有确认可用前，面板保持“未接入”）
    - 不同 provider 的 token 口径
-   - 失败时的降级显示
+   - 价格表换成真实单价，或直接读账单
 2. **聊天后端**
-   当前 `chat-status` 仍是 `configured:false`，点击聊天走 legacy PowerShell 窗口。需要：
+   面板内联聊天、OpenAI 兼容接口和 `glm-5.2` 已跑通。仍需：
    - 统一的 provider 适配层
    - 流式返回
    - 会话记忆
