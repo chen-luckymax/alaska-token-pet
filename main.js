@@ -235,7 +235,7 @@ function createPanelWindow() {
   panelWindow.setAlwaysOnTop(true, 'floating');
   panelWindow.loadURL(`http://127.0.0.1:${appPort}/panel.html`);
   function revealPanel(reason) {
-    if (!panelWindow || panelWindow.isDestroyed()) return;
+    if (!panelWindow || panelWindow.isDestroyed() || panelDismissed) return;
     panelWindow.show();
     panelWindow.setAlwaysOnTop(true, 'screen-saver');
     panelWindow.moveTop();
