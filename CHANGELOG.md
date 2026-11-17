@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.6.2 — 2026-11-17
+
+### 修复
+
+- 托盘图标改为真实 PNG（`app/assets/tray.png`），不再用 Windows 上会显示空白的 SVG data URL；同时生成脚本放在 `model/make_tray_icon.py`。
+- 面板意外收到 `close` 时改为隐藏并阻止退出，避免打开面板后 App 被连带关闭。
+
+### 功能
+
+- 面板新增“最近对话消耗”：每次成功对话列出时间、模型、输入→输出 tokens、总 tokens 和估算花费。
+- 支持通过 `LLM_PROVIDER` / `LLM_API_URL` 接入 DeepSeek 与豆包（火山方舟）的 OpenAI 兼容接口。
+- DeepSeek 会查询 `/user/balance` 并把真实总余额显示到“账户余额”；OpenCSG 和豆包没有确认可用的公开余额接口，继续诚实显示“未接入”。
+
 ## 0.6.1 — 2026-11-17
 
 ### Token 钱包

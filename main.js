@@ -34,6 +34,8 @@ let dragging = false;
 let dragOffset = { x: 0, y: 0 };
 let dragLock = null;
 let stateTimer = null;
+let balanceTimer = null;
+let appQuitting = false;
 let usageTracker = null;
 let panelDismissed = false;
 let panelWatchdog = null;
@@ -138,6 +140,7 @@ function createPetWindow() {
       backgroundThrottling: false
     }
   });
+  petWindow.on('closed', () => { safeLog('[pet] closed'); petWindow = null; });
   petWindow.setAlwaysOnTop(true, 'screen-saver');
   petWindow.setMinimumSize(dims.width, dims.height);
   petWindow.setMaximumSize(dims.width, dims.height);
@@ -253,6 +256,14 @@ function createPanelWindow() {
   setTimeout(() => revealPanel('frame-2'), 1200);
   panelWindow.on('hide', () => safeLog('[panel] hide'));
   panelWindow.on('minimize', () => safeLog('[panel] minimize'));
+  panelWindow.on('close', (event) => {
+    if (!appQuitting) {
+      event.preventDefault();
+      panelDismissed = true;
+      panelWindow.hide();
+      safeLog('[panel] unexpected close prevented');
+    }
+  });
   panelWindow.on('closed', () => { safeLog('[panel] closed'); panelWindow = null; });
 }
 
@@ -290,6 +301,104 @@ function chatUrl(base) {
   return /\/chat\/completions$/i.test(raw) ? raw : `${raw}/chat/completions`;
 }
 
+function providerInfo() {
+  const hint = String(process.env.LLM_PROVIDER || '').toLowerCase();
+  const base = String(process.env.LLM_API_URL || '').toLowerCase();
+  if (hint.includes('deepseek') || base.includes('deepseek')) {
+    return { id: 'deepseek', label: 'DeepSeek' };
+  }
+  if (hint.includes('doubao') || hint.includes('volc') || base.includes('ark.cn-beijing.volces.com')) {
+    return { id: 'doubao', label: '豆包 / 火山方舟' };
+  }
+  if (base.includes('opencsg')) return { id: 'opencsg', label: 'OpenCSG' };
+  if (base.includes('openai.com')) return { id: 'openai', label: 'OpenAI' };
+  return { id: 'compatible', label: 'OpenAI 兼容接口' };
+}
+
+let accountBalanceCache = {
+  available: false,
+  balance: null,
+  currency: 'CNY',
+  provider: '',
+  note: 'OpenCSG 账户余额接口未接入'
+};
+
+async function refreshAccountBalance() {
+  const config = getChatConfig();
+  const provider = providerInfo();
+  if (!config.baseUrl || !config.apiKey) {
+    accountBalanceCache = {
+      available: false,
+      balance: null,
+      currency: 'CNY',
+      provider: provider.id,
+      note: `${provider.label} 余额接口未配置`
+    };
+    return accountBalanceCache;
+  }
+
+  if (provider.id === 'doubao') {
+    accountBalanceCache = {
+      available: false,
+      balance: null,
+      currency: 'CNY',
+      provider: provider.id,
+      note: '火山方舟没有公开余额接口，请到控制台查看'
+    };
+    return accountBalanceCache;
+  }
+
+  if (provider.id === 'deepseek') {
+    try {
+      const origin = new URL(config.baseUrl).origin;
+      const response = await fetch(`${origin}/user/balance`, {
+        headers: { Authorization: `Bearer ${config.apiKey}` },
+        signal: AbortSignal.timeout(8000)
+      });
+      const data = await response.json().catch(() => null);
+      const info = data && Array.isArray(data.balance_infos) ? data.balance_infos[0] : null;
+      const balance = info && Number(info.total_balance);
+      if (response.ok && data && data.is_available !== false && Number.isFinite(balance)) {
+        accountBalanceCache = {
+          available: true,
+          balance,
+          currency: info.currency || 'CNY',
+          provider: provider.id,
+          note: 'DeepSeek 账户总余额'
+        };
+      } else {
+        accountBalanceCache = {
+          available: false,
+          balance: null,
+          currency: 'CNY',
+          provider: provider.id,
+          note: 'DeepSeek 余额接口没有返回可用余额'
+        };
+      }
+    } catch (error) {
+      accountBalanceCache = {
+        available: false,
+        balance: null,
+        currency: 'CNY',
+        provider: provider.id,
+        note: `DeepSeek 余额查询失败：${error.message}`
+      };
+    }
+    return accountBalanceCache;
+  }
+
+  accountBalanceCache = {
+    available: false,
+    balance: null,
+    currency: 'CNY',
+    provider: provider.id,
+    note: provider.id === 'opencsg'
+      ? 'OpenCSG 账户余额接口未接入'
+      : `${provider.label} 余额接口未接入`
+  };
+  return accountBalanceCache;
+}
+
 function getChatConfig() {
   return {
     baseUrl: process.env.LLM_API_URL || '',
@@ -312,12 +421,14 @@ async function probeOllama() {
 async function chatStatusPayload() {
   const config = getChatConfig();
   if (config.baseUrl && config.apiKey) {
+    const provider = providerInfo();
     return {
       configured: true,
       mode: 'remote',
-      message: `已配置远程模型：${config.model || '默认模型'}；密钥只在主进程读取。`,
+      message: `已配置 ${provider.label}：${config.model || '默认模型'}；密钥只在主进程读取。`,
       model: config.model || '',
-      endpoint: config.baseUrl
+      endpoint: config.baseUrl,
+      provider: provider.id
     };
   }
   if (await probeOllama()) {
@@ -419,7 +530,13 @@ function readState() {
   }
   const payload = Object.assign({}, usage, {
     delta,
-    lastTotal
+    lastTotal,
+    accountBalance: accountBalanceCache.available ? accountBalanceCache.balance : null,
+    accountBalanceAvailable: Boolean(accountBalanceCache.available),
+    accountBalanceCurrency: accountBalanceCache.currency || 'CNY',
+    accountBalanceNote: accountBalanceCache.note,
+    provider: providerInfo().id,
+    providerLabel: providerInfo().label
   });
   lastTotal = Number(usage.totalTokens);
   lastUsage = payload;
@@ -429,8 +546,14 @@ function readState() {
 }
 
 function makeTrayIcon() {
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32"><circle cx="16" cy="17" r="13" fill="#FFF0D4"/><circle cx="10" cy="8" r="5" fill="#FFF0D4"/><circle cx="22" cy="8" r="5" fill="#FFF0D4"/><circle cx="11" cy="16" r="3" fill="#2B1B16"/><circle cx="21" cy="16" r="3" fill="#2B1B16"/><circle cx="16" cy="21" r="2.5" fill="#F28C86"/></svg>`;
-  return nativeImage.createFromDataURL(`data:image/svg+xml;base64,${Buffer.from(svg).toString('base64')}`);
+  const iconPath = path.join(__dirname, 'app', 'assets', 'tray.png');
+  const image = nativeImage.createFromPath(iconPath);
+  if (!image.isEmpty()) {
+    safeLog('[tray] icon', image.getSize());
+    return image;
+  }
+  safeError('[tray] icon failed to load', iconPath);
+  return nativeImage.createEmpty();
 }
 
 function buildTray() {
@@ -539,6 +662,7 @@ ipcMain.handle('chat-send', async (_event, payload) => {
     const recorded = usageTracker.recordChat({ usage: result.usage, model: result.model });
     result.usageRecorded = recorded.recorded;
     if (!recorded.recorded) result.usageMissing = true;
+    refreshAccountBalance();
   } else if (result.ok) {
     result.usageMissing = true;
   }
@@ -561,6 +685,8 @@ app.whenReady().then(async () => {
   usageTracker = createUsageTracker({
     dataDir: path.join(app.getPath('userData'), 'usage')
   });
+  refreshAccountBalance();
+  balanceTimer = setInterval(refreshAccountBalance, 5 * 60 * 1000);
   await session.defaultSession.clearCache();
   await startAppServer();
   createPetWindow();
@@ -585,8 +711,12 @@ app.whenReady().then(async () => {
 });
 
 app.on('before-quit', () => {
+  safeLog('[app] before-quit');
+  appQuitting = true;
   if (stateTimer) clearInterval(stateTimer);
+  if (balanceTimer) clearInterval(balanceTimer);
   if (panelWatchdog) clearInterval(panelWatchdog);
   if (appServer) appServer.close();
 });
-app.on('window-all-closed', () => { /* keep tray alive */ });
+app.on('will-quit', () => safeLog('[app] will-quit'));
+app.on('window-all-closed', () => { safeLog('[app] window-all-closed'); /* keep tray alive */ });

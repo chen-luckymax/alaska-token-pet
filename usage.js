@@ -103,6 +103,17 @@ function createUsageTracker(options = {}) {
     const contextPercent = contextWindow > 0 ? Math.min(100, (lastInput / contextWindow) * 100) : 0;
     const dailyLimit = Number(settings.budget.dailyLimit || 10);
     const budgetRemaining = Math.max(0, dailyLimit - todayCost);
+    const recentEntries = ledger.entries.slice(-8).reverse().map((entry) => ({
+      id: entry.id,
+      at: entry.at,
+      day: entry.day,
+      model: entry.model || '',
+      source: entry.source || '',
+      promptTokens: toInt(entry.promptTokens),
+      completionTokens: toInt(entry.completionTokens),
+      totalTokens: toInt(entry.totalTokens),
+      cost: Number(entry.cost || 0)
+    }));
 
     return {
       ok: todayEntries.length > 0,
@@ -133,7 +144,8 @@ function createUsageTracker(options = {}) {
       settings,
       sessionId,
       sessionStartedAt,
-      ledgerPath
+      ledgerPath,
+      recentEntries
     };
   }
 

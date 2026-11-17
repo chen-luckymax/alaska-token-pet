@@ -41,6 +41,7 @@ panel.js → preload.chatSend(messages)
 ```
 
 - 远程配置优先；没有 URL 或 Key 时走 `http://127.0.0.1:11434/v1`。
+- `LLM_PROVIDER` 可选：`deepseek` / `doubao` / `opencsg`；主要用于余额提示和状态文案，实际请求仍按 `LLM_API_URL`。
 - 45 秒超时，最多 12 条消息，`max_tokens` 默认 1200。
 - GLM / DeepSeek 等推理模型会先消耗 reasoning token；预算太小会导致 `content` 为空，因此不要低于 800。
 - 响应中的 `usage` 不丢弃：`chat-send` 写入 usage tracker，再把同一个 state 回传面板。
@@ -55,10 +56,11 @@ OpenAI-compatible response.usage
   → panel 今日 tokens / 今日估算花费 / 本地预算剩余
 ```
 
-- `config/settings.json` 只保存本地预算和价格表；`dailyLimit` 是本地额度，不是 OpenCSG 账户余额。
-- `账户余额` 没有接 OpenCSG 余额接口，固定返回“未接入”；不会用本地预算冒充真实余额。
+- `config/settings.json` 只保存本地预算和价格表；`dailyLimit` 是本地额度，不是服务商账户余额。
+- `账户余额`：DeepSeek 走 `GET /user/balance`；OpenCSG 和豆包 / 火山方舟没有确认可用的公开余额接口，固定显示“未接入”。不会用本地预算冒充真实余额。
 - 账本按本地日期聚合，重启后今日累计保留；`sessionTokens` 从当前 App 启动开始算。
-- 价格表默认只是估算；真实账单以 OpenCSG 控制台为准，若要精确计费需要替换成真实单价。
+- `recentEntries` 保存最近 8 次成功对话，面板按“时间 / 模型 / 输入→输出 / 总 tokens / 估算花费”展示。
+- 价格表默认只是估算；真实账单以服务商控制台为准，若要精确计费需要替换成真实单价。
 
 ## 隐私边界
 

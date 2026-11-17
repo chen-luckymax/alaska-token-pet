@@ -68,12 +68,38 @@ ollama pull llama3.2
 - GLM / DeepSeek 会先花 token 在 `reasoning`；`max_tokens` 低于 800 时 `message.content` 可能为空，所以默认预算为 1200。
 - 网关的思考字段是 `message.reasoning`，不是 `reasoning_content`；界面只显示 `message.content`。
 
+### 接入豆包 / DeepSeek
+
+项目本来就走 OpenAI 兼容的 `/chat/completions`，所以不需要改代码，只要换 `.env`：
+
+```ini
+# DeepSeek（支持账户余额）
+LLM_PROVIDER=deepseek
+LLM_API_URL=https://api.deepseek.com/v1
+LLM_API_KEY=sk-your-deepseek-key
+LLM_MODEL=deepseek-chat
+```
+
+```ini
+# 豆包 / 火山方舟（LLM_MODEL 填控制台创建的接入点 ID，通常是 ep-...）
+LLM_PROVIDER=doubao
+LLM_API_URL=https://ark.cn-beijing.volces.com/api/v3
+LLM_API_KEY=your-ark-key
+LLM_MODEL=ep-your-endpoint-id
+```
+
+- 两家的响应都会返回 `usage`，每次对话都会进入本地账本，面板“最近对话消耗”能看到本轮 tokens 和估算花费。
+- DeepSeek 会额外查询 `/user/balance`，成功后“账户余额”显示真实总余额。
+- 豆包 / 火山方舟目前没有公开的个人账户余额接口，面板会明确显示“未接入”，请到火山控制台查看余额；不伪造数字。
+- OpenCSG 也没有确认可用的余额接口，继续标“未接入”。
+
 ### Token 记账边界
 
 - 每发一条对话，主进程从模型响应的 `usage.prompt_tokens` / `completion_tokens` / `total_tokens` 记账。
 - 账本保存在 Electron 的 `userData/usage/usage-ledger.json`，重启后今日累计仍在；本次会话 token 从 App 启动开始算。
-- `dailyLimit` 和价格表在 `config/settings.json`；默认价格表是本地估算，不代表 OpenCSG 账单，真实费用以控制台为准。
-- `账户余额` 目前没有接 OpenCSG 余额接口，面板固定显示“未接入”，不会拿本地预算冒充账户余额。
+- `dailyLimit` 和价格表在 `config/settings.json`；默认价格表是本地估算，不代表服务商账单，真实费用以控制台为准。
+- 面板底部“最近对话消耗”按每次成功对话列出时间、模型、输入→输出 tokens、总 tokens 和估算花费。
+- 账户余额只在服务商确实返回余额时显示；DeepSeek 可查，OpenCSG 和豆包目前显示“未接入”，不会拿本地预算冒充账户余额。
 - 相关测试：`npm test` 会跑 `test/check-usage.js`；`test/e2e-usage.js` 用真实模型响应验证 token 是否进入面板。
 
 ## 检查与测试

@@ -137,6 +137,16 @@ main::-webkit-scrollbar-thumb { background: #E2C8AE; border-radius: 99px; border
 .feed-btn:active { transform: translateY(1px); }
 .feed-note { margin: 9px 0 0; font-size: 9px; line-height: 1.5; color: #9C8069; }
 
+.recent-box { padding-bottom: 10px; }
+.recent-list { margin-top: 9px; display: flex; flex-direction: column; gap: 5px; }
+.recent-empty { margin: 2px 0 0; font-size: 9px; line-height: 1.5; color: #9C8069; }
+.recent-row { display: grid; grid-template-columns: 44px minmax(0, 1fr) auto auto; align-items: center; gap: 7px; padding: 6px 8px; border: 1px solid #F0DFC9; border-radius: 9px; background: #FFFDF8; }
+.recent-time { font-size: 8px; color: #A0836B; font-variant-numeric: tabular-nums; }
+.recent-main { min-width: 0; font-size: 9px; color: #6E5543; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.recent-main b { font-weight: 700; color: #4F3A2B; }
+.recent-cost { font-size: 9px; color: #9B6C51; font-variant-numeric: tabular-nums; }
+.recent-tokens { font-size: 9px; color: #5D806B; font-weight: 700; font-variant-numeric: tabular-nums; }
+
 .chat-intro { padding: 18px; border-radius: 18px; background: linear-gradient(145deg, #FFFDF8, #FFF4E6); border: 1px solid #EAD6C1; }
 .chat-mark { display: inline-flex; width: 30px; height: 30px; border-radius: 50%; align-items: center; justify-content: center; background: #F5DCC0; color: #9D5A31; font-size: 10px; font-weight: 850; letter-spacing: .08em; }
 .chat-intro h2 { margin: 10px 0 0; font-size: 16px; letter-spacing: .02em; }

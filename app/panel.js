@@ -18,6 +18,44 @@ function money(n, digits) {
   const precision = digits !== undefined ? digits : (Math.abs(value) < 1 ? 4 : 2);
   return `¥${value.toFixed(precision).replace(/\.?0+$/, '')}`;
 }
+function accountMoney(n, currency) {
+  const value = Number(n || 0);
+  const symbol = currency === 'USD' ? '$' : currency === 'CNY' ? '¥' : `${currency || ''} `;
+  return `${symbol}${value.toFixed(2).replace(/\.?0+$/, '')}`;
+}
+
+function renderRecent(state) {
+  const list = document.getElementById('recentList');
+  if (!list) return;
+  const entries = Array.isArray(state.recentEntries) ? state.recentEntries : [];
+  if (!entries.length) {
+    list.innerHTML = '<p class="recent-empty">还没有记账；发一条对话后会出现本轮 tokens 和估算花费。</p>';
+    return;
+  }
+  list.textContent = '';
+  entries.forEach((entry) => {
+    const row = document.createElement('div');
+    row.className = 'recent-row';
+    const at = new Date(entry.at);
+    const today = at.toDateString() === new Date().toDateString();
+    const time = document.createElement('span');
+    time.className = 'recent-time';
+    time.textContent = today
+      ? at.toLocaleTimeString('zh-CN', { hour12: false })
+      : at.toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' });
+    const main = document.createElement('span');
+    main.className = 'recent-main';
+    main.textContent = `${entry.model || '模型'} · ${fmt(entry.promptTokens)} → ${fmt(entry.completionTokens)}`;
+    const tokens = document.createElement('span');
+    tokens.className = 'recent-tokens';
+    tokens.textContent = `${fmt(entry.totalTokens)} tokens`;
+    const cost = document.createElement('span');
+    cost.className = 'recent-cost';
+    cost.textContent = money(entry.cost, 4);
+    row.append(time, main, tokens, cost);
+    list.appendChild(row);
+  });
+}
 
 function render(state) {
   if (!state) return;
@@ -28,14 +66,15 @@ function render(state) {
   const limit = state.dailyLimit || (state.settings && state.settings.budget ? state.settings.budget.dailyLimit : 10);
   document.getElementById('budgetHint').textContent = `上限 ${money(limit)} · 本地预算，不是账户余额`;
   document.getElementById('accountBalance').textContent = state.accountBalanceAvailable
-    ? money(state.accountBalance)
+    ? accountMoney(state.accountBalance, state.accountBalanceCurrency)
     : '未接入';
   document.getElementById('accountBalanceNote').textContent = state.accountBalanceAvailable
-    ? 'OpenCSG 账户余额'
+    ? (state.accountBalanceNote || '账户总余额')
     : (state.accountBalanceNote || 'OpenCSG 余额接口暂未配置');
   document.getElementById('sourceLine').textContent = state.ok
     ? `${state.source} · 本次会话 ${fmt(state.sessionTokens)} tokens · ${new Date(state.updatedAt).toLocaleTimeString('zh-CN', { hour12: false })}`
     : '本次 App 对话还没有记录；发一条消息后开始记账。';
+  renderRecent(state);
   const pct = Math.min(100, Math.max(0, Number(state.contextPercent || 0)));
   document.getElementById('contextFill').style.width = `${pct}%`;
   document.getElementById('contextText').textContent = `${pct.toFixed(1)}%`;
