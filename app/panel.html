@@ -24,6 +24,7 @@
   <nav class="tabs">
     <button class="tab active" data-tab="balance">钱包</button>
     <button class="tab" data-tab="chat">对话</button>
+    <button class="tab" data-tab="invent">彩蛋</button>
     <span class="status-dot"></span>
   </nav>
 
@@ -113,6 +114,75 @@
         <button id="openChatBtn" class="ghost-btn">打开独立对话窗口</button>
         <span id="chatHint" class="chat-hint">Enter 发送 · Shift+Enter 换行</span>
       </div>
+    </section>
+
+    <section id="tab-invent" class="tab-panel">
+      <div class="invent-hero">
+        <span class="invent-seal">AP</span>
+        <div>
+          <p class="invent-kicker">ALASKA PATENT OFFICE</p>
+          <h2>烦恼发明局</h2>
+          <p>输入一件小烦恼，生成一份正式荒诞专利。纯本地生成，不烧 token。</p>
+        </div>
+      </div>
+
+      <div class="invent-form">
+        <label for="inventInput">你的烦恼是什么？</label>
+        <textarea id="inventInput" maxlength="120" rows="3" placeholder="例如：早上总是起不来"></textarea>
+        <div class="invent-form-foot">
+          <span id="inventCount">0 / 120</span>
+          <button id="inventBtn" class="primary-btn invent-submit">立案</button>
+        </div>
+      </div>
+
+      <div class="invent-examples">
+        <button class="invent-chip" data-example="早上总是起不来">起不来</button>
+        <button class="invent-chip" data-example="找不到钥匙">找钥匙</button>
+        <button class="invent-chip" data-example="开会没人说话">开会冷场</button>
+        <button class="invent-chip" data-example="手机关键时刻没电">手机没电</button>
+      </div>
+
+      <div id="inventEmpty" class="invent-empty">
+        <b>受理范围</b>
+        <p>起床、找东西、拖延、社交、饿、困、快递、手机没电。<br>不负责真正解决，只负责让它看起来很有前途。</p>
+      </div>
+
+      <article id="inventCard" class="invent-card" hidden>
+        <div class="invent-card-head">
+          <span>受理档案</span>
+          <strong id="inventPatent">AP-2026-0000</strong>
+        </div>
+        <p class="invent-label">发明名称 / TITLE</p>
+        <h3 id="inventName"></h3>
+        <p id="inventTagline" class="invent-tagline"></p>
+
+        <div class="invent-block">
+          <p class="invent-label">原始烦恼 / COMPLAINT</p>
+          <p id="inventProblem" class="invent-problem"></p>
+        </div>
+        <div class="invent-block">
+          <p class="invent-label">工作原理 / MECHANISM</p>
+          <p id="inventMechanism"></p>
+        </div>
+        <div class="invent-block">
+          <p class="invent-label">使用步骤 / PROTOCOL</p>
+          <ol id="inventSteps" class="invent-steps"></ol>
+        </div>
+        <div class="invent-block">
+          <p class="invent-label">已知副作用 / SIDE EFFECTS</p>
+          <ul id="inventEffects" class="invent-effects"></ul>
+        </div>
+
+        <div class="invent-scores">
+          <div><span>荒诞指数</span><b id="inventAbsurdity">0%</b></div>
+          <div><span>可行性</span><b id="inventFeasibility">0%</b></div>
+        </div>
+
+        <div class="invent-actions">
+          <button id="inventCopyBtn" class="ghost-btn">复制档案</button>
+          <button id="inventDownloadBtn" class="ghost-btn">下载 .txt</button>
+        </div>
+      </article>
     </section>
   </main>
 

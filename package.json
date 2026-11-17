@@ -1,7 +1,7 @@
 {
   "name": "lulu-pet",
   "productName": "阿拉斯加",
-  "version": "0.6.2",
+  "version": "0.6.3",
   "description": "阿拉斯加 · 3D AI token 桌面宠物",
   "main": "main.js",
   "scripts": {
